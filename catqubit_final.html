@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Quantum Cat Qubit | Risograph Lab</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
+    <style>
+        body { margin: 0; background-color: #FAFAFA; overflow: hidden; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        .interface {
+            position: fixed;
+            top: 40px; left: 40px;
+            pointer-events: none; z-index: 10;
+        }
+        .label { font-size: 10px; letter-spacing: 0.3em; color: #005CB9; text-transform: uppercase; margin-bottom: 5px; }
+        .stability-wrapper { width: 240px; height: 3px; background: rgba(0, 92, 185, 0.1); }
+        #bar { width: 100%; height: 100%; background: #005CB9; transition: width 0.2s; }
+        .controls { margin-top: 16px; font-size: 16px; color: #FF665E; font-weight: 400; }
+    </style>
+</head>
+<body>
+    <div class="interface">
+        <div class="label">Quantum Coherence Stability</div>
+        <div class="stability-wrapper"><div id="bar"></div></div>
+        <div class="controls">ARROWS: ROTATE TO STABILIZE<br><span id="status">STATE: COHERENT</span></div>
+    </div>
+
+    <script>
+        // --- 1. Game & Physics State ---
+        let angle = 0;
+        let rotSpeed = 0;
+        let stability = 100;
+        let isCollapsed = false;
+        let isStabilized = false;
+        let progress = 0; 
+
+        // --- 2. Risograph Visual Elements ---
+        const baseSize = 200;
+        const splitDistance = 220;
+        let blueFringePts = [], orangeFringePts = [], blobPts = [], noisePts = [];
+        let noiseOffset = 0;
+        let risoBlue, risoOrange;
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            pixelDensity(1);
+            risoBlue = color(0, 92, 185);
+            risoOrange = color(255, 102, 94);
+
+            // 점묘화 입자 생성 (성능을 위해 최적화된 개수)
+            for (let i = 0; i < 15000; i++) {
+                blueFringePts.push({ x: randomGaussian(0, 50), y: randomGaussian(0, 140), size: random(1, 3), prob: Math.random() });
+                orangeFringePts.push({ x: randomGaussian(0, 50), y: randomGaussian(0, 140), size: random(1, 3), prob: Math.random() });
+            }
+            for (let i = 0; i < 40000; i++) {
+                blobPts.push({ x: randomGaussian(0, baseSize / 2.3), y: randomGaussian(0, baseSize / 2.3), size: random(1.5, 4), prob: Math.random() });
+            }
+            for (let i = 0; i < 15000; i++) {
+                noisePts.push({ x: random(width), y: random(height), size: random(1, 2) });
+            }
+        }
+
+        function easeInOutCubic(t) {
+            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+
+        function drawRisoBlob(cx, cy, scaleX, scaleY, densityMultiplier, col) {
+            fill(col);
+            noStroke();
+            let flickerBase = noise(noiseOffset) * 0.3 + 0.7;
+            for (let pt of blobPts) {
+                let normX = pt.x / (baseSize / 2.3);
+                let normY = pt.y / (baseSize / 2.3);
+                let dSq = normX * normX + normY * normY;
+                let rawProb = exp(-dSq * 5.5); // 선명한 경계를 위해 조정
+                let dynamicThreshold = pt.prob + noise(pt.x * 0.1, pt.y * 0.1, frameCount * 0.05) * 0.1 - 0.05;
+
+                if (rawProb * densityMultiplier * flickerBase > dynamicThreshold) {
+                    circle(cx + pt.x * scaleX, cy + pt.y * scaleY, pt.size);
+                }
+            }
+        }
+
+        function draw() {
+            if (isCollapsed) { drawCollapseScreen(); return; }
+            if (isStabilized) { drawSuccessScreen(); return; }
+
+            background('#FDFDFD');
+            drawPaperNoise();
+            handleInput();
+            updateStability();
+            noiseOffset += 0.02;
+
+            // angle의 절대값에 비례하여 애니메이션 진행 (0~30 라디안)
+            progress = constrain(map(abs(angle), 0, 30, 0, 1), 0, 1);
+
+            let squeezeAmt = 0;
+            let splitAmt = 0;
+            let pipAmt = 0;
+
+            // 시퀀스 맵핑
+            if (progress < 0.1) {
+                pipAmt = 0; squeezeAmt = 0; splitAmt = 0;
+            } else if (progress < 0.5) {
+                pipAmt = map(progress, 0.1, 0.5, 0, 1);
+                squeezeAmt = pipAmt;
+                splitAmt = 0;
+            } else if (progress < 0.95) {
+                pipAmt = 1.0; squeezeAmt = 1.0;
+                splitAmt = map(progress, 0.5, 0.95, 0, 1);
+            } else {
+                pipAmt = 1.0; squeezeAmt = 1.0; splitAmt = 1.0;
+                if (stability > 50) isStabilized = true; 
+            }
+
+            blendMode(MULTIPLY);
+            push();
+            translate(width / 2, height / 2);
+            rotate(angle * 0.2); 
+
+            let shapeSqueeze = squeezeAmt * (1.0 - splitAmt);
+            let scaleX = lerp(1.0, 0.2, shapeSqueeze);
+            let scaleY = lerp(1.0, 2.8, shapeSqueeze);
+            let offset = splitDistance * splitAmt;
+
+            // 1. Orange Pips: 양옆에서 중앙으로 압박하며 등장
+            if (pipAmt > 0 && splitAmt < 0.9) {
+                let pipScale = lerp(0.01, 0.4, pipAmt);
+                let pipDist = lerp(200, 50, pipAmt);
+                let pipAlpha = color(255, 102, 94, lerp(0, 200, pipAmt) * (1.0 - splitAmt));
+                drawRisoBlob(-pipDist, 0, pipScale * 0.7, pipScale * 1.5, 1.2, pipAlpha);
+                drawRisoBlob(pipDist, 0, pipScale * 0.7, pipScale * 1.5, 1.2, pipAlpha);
+            }
+
+            // 2. 간섭 무늬 (Fringes)
+            if (splitAmt > 0.1) {
+                drawFringes(splitAmt);
+            }
+
+            // 3. 메인 큐비트 (Blobs)
+            let baseAlpha = color(0, 92, 185, 220);
+            if (offset < 2) {
+                drawRisoBlob(0, 0, scaleX, scaleY, 1.4, baseAlpha);
+            } else {
+                drawRisoBlob(0, -offset, scaleX, scaleY, 1.2, baseAlpha);
+                drawRisoBlob(0, offset, scaleX, scaleY, 1.2, baseAlpha);
+            }
+            pop();
+            blendMode(BLEND);
+
+            updateUI(squeezeAmt, splitAmt);
+        }
+
+        function drawFringes(amt) {
+            let k = 0.4;
+            let phase = frameCount * -0.2;
+            fill(risoBlue);
+            for (let pt of blueFringePts) {
+                let env = exp(-(pt.x*pt.x)/(2*100*100) - (pt.y*pt.y)/(2*45*45));
+                let wave = 0.5 + 0.5 * cos(pt.x * k + phase);
+                if (env * wave * amt * 1.5 > pt.prob) circle(pt.x, pt.y, pt.size);
+            }
+            fill(risoOrange);
+            for (let pt of orangeFringePts) {
+                let env = exp(-(pt.x*pt.x)/(2*100*100) - (pt.y*pt.y)/(2*45*45));
+                let wave = 0.5 + 0.5 * cos(pt.x * k + PI + phase);
+                if (env * wave * amt * 1.8 > pt.prob) circle(pt.x, pt.y, pt.size);
+            }
+        }
+
+        function handleInput() {
+            if (keyIsDown(LEFT_ARROW)) rotSpeed -= 0.005;
+            if (keyIsDown(RIGHT_ARROW)) rotSpeed += 0.005;
+            rotSpeed += (noise(frameCount * 0.05) - 0.5) * 0.002;
+            rotSpeed *= 0.98;
+            angle += rotSpeed;
+        }
+
+        function updateStability() {
+            if (abs(rotSpeed) > 0.12) stability -= 0.8;
+            else stability = min(100, stability + 0.1);
+            document.getElementById('bar').style.width = stability + "%";
+            if (stability <= 0) isCollapsed = true;
+        }
+
+        function updateUI(squeeze, split) {
+            let status = "STATE: COHERENT";
+            if (split > 0.5) status = "STATE: CAT (SUPERPOSITION)";
+            else if (squeeze > 0.1) status = "STATE: SQUEEZING ENERGY";
+            document.getElementById('status').innerText = status;
+        }
+
+        function drawPaperNoise() {
+            fill(0, 0, 0, 15);
+            noStroke();
+            for (let pt of noisePts) rect(pt.x, pt.y, pt.size, pt.size);
+        }
+
+        function drawSuccessScreen() {
+            background('#FDFDFD');
+            drawPaperNoise();
+            blendMode(MULTIPLY);
+            push();
+            translate(width/2, height/2);
+            rotate(angle * 0.2);
+            drawRisoBlob(0, -splitDistance, 0.4, 2.2, 1.2, risoBlue);
+            drawRisoBlob(0, splitDistance, 0.4, 2.2, 1.2, risoBlue);
+            pop();
+            blendMode(BLEND);
+            fill(risoBlue);
+            textAlign(CENTER, CENTER);
+            textSize(32);
+            text("Stabilized cat qubit state completed", width/2, height/2);
+        }
+
+        function drawCollapseScreen() {
+            background('#FDFDFD');
+            fill(risoOrange);
+            textAlign(CENTER, CENTER);
+            textSize(40);
+            text("STATE COLLAPSED", width/2, height/2);
+        }
+
+        function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+    </script>
+</body>
+</html>
