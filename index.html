@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Quantum State Transition - Risograph</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #FAFAFA;
+            overflow: hidden;
+            font-family: sans-serif;
+        }
+
+        canvas {
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            background-color: #FDFDFD;
+        }
+    </style>
+</head>
+
+<body>
+    <script>
+        const totalFrames = 180; // Faster loop! 3 seconds total at 60fps (180 frames)
+        const baseSize = 200;
+        const splitDistance = 220;
+
+        // Arrays for generating stippled ink clouds
+        let blueFringePts = [];
+        let orangeFringePts = [];
+        let blobPts = [];
+
+        // We will use 1D noise for the subtle "flicker" effect
+        let noiseOffset = 0;
+
+        let risoBlue, risoOrange;
+
+        function setup() {
+            createCanvas(900, 600);
+            pixelDensity(1);
+
+            // Classic Risograph ink colors
+            risoBlue = color('#005CB9');
+            risoOrange = color('#FF665E');
+
+            // Fringes (now spread horizontally X, gathered vertically Y between the split)
+            for (let i = 0; i < 18000; i++) {
+                blueFringePts.push({
+                    x: randomGaussian(0, 150), // Spread across X
+                    y: randomGaussian(0, 70), // Gathered in center Y
+                    size: random(1, 4),
+                    prob: Math.random()
+                });
+                orangeFringePts.push({
+                    x: randomGaussian(0, 150),
+                    y: randomGaussian(0, 70),
+                    size: random(1, 4),
+                    prob: Math.random() // independent probability
+                });
+            }
+
+            // Points for the main quantum state blobs
+            // Tighter normal distribution for cohesive marks
+            for (let i = 0; i < 50000; i++) {
+                blobPts.push({
+                    x: randomGaussian(0, baseSize / 2.3),
+                    y: randomGaussian(0, baseSize / 2.3),
+                    size: random(1.5, 4.5),
+                    prob: Math.random()
+                });
+            }
+        }
+
+        // Smooth transition easing
+        function easeInOutCubic(t) {
+            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+
+        function drawRisoBlob(cx, cy, scaleX, scaleY, densityMultiplier, col) {
+            fill(col);
+            noStroke();
+
+            let flickerBase = noise(noiseOffset) * 0.4 + 0.6; // Subtle flicker
+
+            for (let pt of blobPts) {
+                // Sharper falloff to avoid "flying" dots
+                let normX = pt.x / (baseSize / 2.3);
+                let normY = pt.y / (baseSize / 2.3);
+                let dSq = normX * normX + normY * normY;
+
+                // Much sharper Gaussian edge probability
+                let rawProb = exp(-dSq * 4.5);
+
+                let dynamicThreshold = pt.prob + noise(pt.x * 0.1, pt.y * 0.1, frameCount * 0.05) * 0.1 - 0.05;
+
+                if (rawProb * densityMultiplier * flickerBase > dynamicThreshold) {
+                    circle(cx + pt.x * scaleX, cy + pt.y * scaleY, pt.size);
+                }
+            }
+        }
+
+        function draw() {
+            // Clear background with textured paper white
+            background('#FDFDFD');
+
+            // Draw the static paper noise underneath
+            drawPaperNoise();
+
+            // blendMode(MULTIPLY) produces the classic layered ink Risograph aesthetic
+            // Wait, multiplying against #FDFDFD is fine, but it limits our colors if the dots are solid.
+            // We will keep Multiply but use slight opacity in the fill for layering.
+            // Actually, pure pointillism implies solid colors layered. Let's try pure colors with MULTIPLY.
+            blendMode(MULTIPLY);
+
+            noiseOffset += 0.02;
+
+            let t = (frameCount % totalFrames) / totalFrames;
+
+            let squeezeAmt = 0;
+            let splitAmt = 0;
+
+            // Sequence Map:
+            // 0.00 - 0.05: Coherent state (round ball)
+            // 0.05 - 0.25: Squeeze operator acts (becomes vertical pill)
+            // 0.25 - 0.45: Split to cat legs vertically
+            // 0.45 - 0.65: Hold Cat State
+            // 0.65 - 0.85: Reverse process (lobes recombine)
+            // 0.85 - 1.00: Return to circular wave packet
+
+            if (t < 0.05) {
+                squeezeAmt = 0;
+                splitAmt = 0;
+            } else if (t < 0.25) {
+                squeezeAmt = easeInOutCubic((t - 0.05) / 0.20);
+                splitAmt = 0;
+            } else if (t < 0.45) {
+                squeezeAmt = 1.0;
+                splitAmt = easeInOutCubic((t - 0.25) / 0.20);
+            } else if (t < 0.65) {
+                squeezeAmt = 1.0;
+                splitAmt = 1.0;
+            } else if (t < 0.85) {
+                squeezeAmt = 1.0;
+                splitAmt = 1.0 - easeInOutCubic((t - 0.65) / 0.20);
+            } else {
+                squeezeAmt = 1.0 - easeInOutCubic((t - 0.85) / 0.15);
+                splitAmt = 0;
+            }
+
+            // The "Pill" shape: highly squeezed X, stretched Y
+            // When it splits, the individual legs unsqueeze slightly to remain distinct coherent states
+            // In the user's reference, the cat legs are slightly squashed circles, maybe perfectly round.
+            let shapeSqueeze = squeezeAmt * (1.0 - splitAmt * 0.4);
+
+            push();
+            translate(width / 2, height / 2);
+
+            // Calculate scaling
+            let scaleX = lerp(1.0, 0.2, shapeSqueeze);
+            let scaleY = lerp(1.0, 2.8, shapeSqueeze);
+
+            let offset = splitDistance * splitAmt;
+
+            // --- Draw Fringes (Interference Pattern) ---
+            if (splitAmt > 0) {
+                noStroke();
+
+                let k = 0.25; // Interference fringe spatial frequency
+                let timePhase = frameCount * -0.15; // Faster plucked vibration
+
+                let fringeDensity = splitAmt; // Fade in density
+
+                // Blue Fringes
+                fill(risoBlue);
+                for (let pt of blueFringePts) {
+                    // Envelope tightened vertically
+                    let envXSq = (pt.x * pt.x) / (2 * 130 * 130);
+                    let envYSq = (pt.y * pt.y) / (2 * 50 * 50);
+                    let env = exp(-envXSq - envYSq);
+
+                    // Now ripples form along the X axis horizontally between the vertical gap!
+                    let wave = 0.5 + 0.5 * cos(pt.y * k + timePhase);
+
+                    let dynamicThresh = pt.prob + noise(pt.x * 0.1, pt.y * 0.1, frameCount * 0.1) * 0.3 - 0.15;
+                    let prob = env * wave * fringeDensity * 1.5;
+
+                    if (prob > dynamicThresh) {
+                        circle(pt.x, pt.y, pt.size);
+                    }
+                }
+
+                // Orange Fringes (Interlaced phase shift)
+                fill(risoOrange);
+                for (let pt of orangeFringePts) {
+                    let envXSq = (pt.x * pt.x) / (2 * 130 * 130);
+                    let envYSq = (pt.y * pt.y) / (2 * 50 * 50);
+                    let env = exp(-envXSq - envYSq);
+
+                    // Shifted by PI to interlace exactly between the blue fringes
+                    let wave = 0.5 + 0.5 * cos(pt.y * k + Math.PI + timePhase);
+
+                    let dynamicThresh = pt.prob + noise(pt.x * 0.1, pt.y * 0.1, frameCount * 0.1 + 100) * 0.2 - 0.1;
+                    let prob = env * wave * fringeDensity * 1.8;
+
+                    if (prob > dynamicThresh) {
+                        circle(pt.x, pt.y, pt.size);
+                    }
+                }
+            }
+
+            // --- Draw the Quantum State Lobes (Cat Legs) ---
+            // We draw the blob points. When split is 0, they are heavily squeezed.
+            // We only need to draw two blobs when split > 0, but to transition smoothly:
+            // We map opacity density.
+
+            let baseAlpha = color(red(risoBlue), green(risoBlue), blue(risoBlue), 220); // Higher alpha for dense ink
+
+            if (offset < 0.5) {
+                // Draw single blob with high density
+                drawRisoBlob(0, 0, scaleX, scaleY, 1.3, baseAlpha);
+            } else {
+                // Split up and down!
+                // The split moves along the Imaginary (Y) axis
+                drawRisoBlob(0, -offset, scaleX, scaleY, 1.1, baseAlpha);
+                drawRisoBlob(0, offset, scaleX, scaleY, 1.1, baseAlpha);
+            }
+
+            pop();
+
+            // Blend normal to render a subtle static paper noise across the whole screen continuously
+            blendMode(BLEND);
+        }
+
+        // Static speckled paper noise
+        let noisePts = null;
+        function drawPaperNoise() {
+            if (!noisePts) {
+                noisePts = [];
+                for (let i = 0; i < 25000; i++) {
+                    noisePts.push({ x: random(width), y: random(height), size: random(1, 2) });
+                }
+            }
+            fill(0, 0, 0, 15);
+            noStroke();
+            for (let pt of noisePts) {
+                rect(pt.x, pt.y, pt.size, pt.size);
+            }
+        }
+    </script>
+</body>
+
+</html>
