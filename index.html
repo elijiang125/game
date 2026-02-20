@@ -49,28 +49,28 @@
             risoBlue = color('#005CB9');
             risoOrange = color('#FF665E');
 
-            // Fringes (now spread horizontally X, gathered vertically Y between the split)
-            for (let i = 0; i < 18000; i++) {
+            // Fringes (gathered horizontally X, spread vertically Y between the split)
+            for (let i = 0; i < 20000; i++) {
                 blueFringePts.push({
-                    x: randomGaussian(0, 150), // Spread across X
-                    y: randomGaussian(0, 70), // Gathered in center Y
+                    x: randomGaussian(0, 50), // Gathered very tight in center X
+                    y: randomGaussian(0, 140), // Spread across Y
                     size: random(1, 4),
                     prob: Math.random()
                 });
                 orangeFringePts.push({
-                    x: randomGaussian(0, 150),
-                    y: randomGaussian(0, 70),
+                    x: randomGaussian(0, 50),
+                    y: randomGaussian(0, 140),
                     size: random(1, 4),
                     prob: Math.random() // independent probability
                 });
             }
 
             // Points for the main quantum state blobs
-            // Tighter normal distribution for cohesive marks
-            for (let i = 0; i < 50000; i++) {
+            // Massive cloud with very tight cohesive bounds
+            for (let i = 0; i < 60000; i++) {
                 blobPts.push({
-                    x: randomGaussian(0, baseSize / 2.3),
-                    y: randomGaussian(0, baseSize / 2.3),
+                    x: randomGaussian(0, baseSize / 2.2),
+                    y: randomGaussian(0, baseSize / 2.2),
                     size: random(1.5, 4.5),
                     prob: Math.random()
                 });
@@ -94,10 +94,10 @@
                 let normY = pt.y / (baseSize / 2.3);
                 let dSq = normX * normX + normY * normY;
 
-                // Much sharper Gaussian edge probability
-                let rawProb = exp(-dSq * 4.5);
+                // Extremely sharp falloff to create a "solid ink stamp" boundary
+                let rawProb = exp(-dSq * 6.5);
 
-                let dynamicThreshold = pt.prob + noise(pt.x * 0.1, pt.y * 0.1, frameCount * 0.05) * 0.1 - 0.05;
+                let dynamicThreshold = pt.prob + noise(pt.x * 0.1, pt.y * 0.1, frameCount * 0.04) * 0.08 - 0.04;
 
                 if (rawProb * densityMultiplier * flickerBase > dynamicThreshold) {
                     circle(cx + pt.x * scaleX, cy + pt.y * scaleY, pt.size);
@@ -124,89 +124,100 @@
 
             let squeezeAmt = 0;
             let splitAmt = 0;
+            let pipAmt = 0;
 
-            // Sequence Map:
-            // 0.00 - 0.05: Coherent state (round ball)
-            // 0.05 - 0.25: Squeeze operator acts (becomes vertical pill)
-            // 0.25 - 0.45: Split to cat legs vertically
-            // 0.45 - 0.65: Hold Cat State
-            // 0.65 - 0.85: Reverse process (lobes recombine)
-            // 0.85 - 1.00: Return to circular wave packet
+            // Sequence Map (One-shot, ends on final state):
+            // 0.00 - 0.10: Coherent state (round ball)
+            // 0.10 - 0.40: Orange pips appear on sides moving inward, squeezing ball horizontally
+            // 0.40 - 0.70: The state splits out horizontally into Left and Right legs
+            // 0.70 - 1.00: Hold Cat State (Ends here)
 
-            if (t < 0.05) {
+            if (t < 0.10) {
+                pipAmt = 0;
                 squeezeAmt = 0;
                 splitAmt = 0;
-            } else if (t < 0.25) {
-                squeezeAmt = easeInOutCubic((t - 0.05) / 0.20);
+            } else if (t < 0.40) {
+                pipAmt = easeInOutCubic((t - 0.10) / 0.30);
+                squeezeAmt = pipAmt;
                 splitAmt = 0;
-            } else if (t < 0.45) {
+            } else if (t < 0.70) {
+                pipAmt = 1.0;
                 squeezeAmt = 1.0;
-                splitAmt = easeInOutCubic((t - 0.25) / 0.20);
-            } else if (t < 0.65) {
-                squeezeAmt = 1.0;
-                splitAmt = 1.0;
-            } else if (t < 0.85) {
-                squeezeAmt = 1.0;
-                splitAmt = 1.0 - easeInOutCubic((t - 0.65) / 0.20);
+                splitAmt = easeInOutCubic((t - 0.40) / 0.30);
             } else {
-                squeezeAmt = 1.0 - easeInOutCubic((t - 0.85) / 0.15);
-                splitAmt = 0;
+                pipAmt = 1.0;
+                squeezeAmt = 1.0;
+                splitAmt = 1.0; // Hold at the split state eternally
             }
 
             // The "Pill" shape: highly squeezed X, stretched Y
-            // When it splits, the individual legs unsqueeze slightly to remain distinct coherent states
-            // In the user's reference, the cat legs are slightly squashed circles, maybe perfectly round.
-            let shapeSqueeze = squeezeAmt * (1.0 - splitAmt * 0.4);
+            // Because we're splitting vertically, the ball should squeeze horizontally first
+            let shapeSqueeze = squeezeAmt * (1.0 - splitAmt);
 
             push();
             translate(width / 2, height / 2);
 
-            // Calculate scaling
+            // Calculate scaling: vertically stretched, horizontally squeezed
             let scaleX = lerp(1.0, 0.2, shapeSqueeze);
             let scaleY = lerp(1.0, 2.8, shapeSqueeze);
 
             let offset = splitDistance * splitAmt;
 
-            // --- Draw Fringes (Interference Pattern) ---
+            // --- Draw Orange Pips (The "Squeezers") ---
+            // They push from Left and Right now to squeeze the ball into a vertical pill
+            if (pipAmt > 0 && splitAmt < 1) {
+                let currentPipScale = lerp(0.01, 0.40, pipAmt);
+                let currentPipDist = lerp(120, 38, pipAmt);
+                // Smooth fade out using inverted cubic easing on the split fraction
+                let pipOpacity = lerp(0, 220, pipAmt) * (1.0 - easeInOutCubic(splitAmt));
+
+                let pipAlpha = color(red(risoOrange), green(risoOrange), blue(risoOrange), pipOpacity);
+                // Push from left and right
+                drawRisoBlob(-currentPipDist, 0, currentPipScale * 0.7, currentPipScale * 1.5, 1.2, pipAlpha);
+                drawRisoBlob(currentPipDist, 0, currentPipScale * 0.7, currentPipScale * 1.5, 1.2, pipAlpha);
+            }
+
+            // --- Draw Center Fringes (Interference Pattern) ---
             if (splitAmt > 0) {
                 noStroke();
 
-                let k = 0.25; // Interference fringe spatial frequency
-                let timePhase = frameCount * -0.15; // Faster plucked vibration
+                let k = 0.40; // Tighter fringe spacing
+                let timePhase = frameCount * -0.20;
 
-                let fringeDensity = splitAmt; // Fade in density
+                // Image 3 Rotated 90 Degrees.
+                // The split is Top/Bottom (Y-axis).
+                // The fringes run as VERTICAL STRIPES, meaning we modulate `x` in the cosine.
+                // The overall envelope should be narrow vertically and stretched horizontally between the balls.
 
                 // Blue Fringes
                 fill(risoBlue);
                 for (let pt of blueFringePts) {
-                    // Envelope tightened vertically
-                    let envXSq = (pt.x * pt.x) / (2 * 130 * 130);
-                    let envYSq = (pt.y * pt.y) / (2 * 50 * 50);
+                    let envXSq = (pt.x * pt.x) / (2 * 100 * 100); // spread horizontally
+                    let envYSq = (pt.y * pt.y) / (2 * 45 * 45);  // narrow vertically
                     let env = exp(-envXSq - envYSq);
 
-                    // Now ripples form along the X axis horizontally between the vertical gap!
-                    let wave = 0.5 + 0.5 * cos(pt.y * k + timePhase);
+                    let wave = 0.5 + 0.5 * cos(pt.x * k + timePhase); // Vertical stripes!
 
-                    let dynamicThresh = pt.prob + noise(pt.x * 0.1, pt.y * 0.1, frameCount * 0.1) * 0.3 - 0.15;
-                    let prob = env * wave * fringeDensity * 1.5;
+                    let dynamicThresh = pt.prob + noise(pt.x * 0.1, pt.y * 0.1, frameCount * 0.1) * 0.1 - 0.05;
+                    let prob = env * wave * splitAmt * 1.5;
 
                     if (prob > dynamicThresh) {
                         circle(pt.x, pt.y, pt.size);
                     }
                 }
 
-                // Orange Fringes (Interlaced phase shift)
+                // Orange Fringes
                 fill(risoOrange);
                 for (let pt of orangeFringePts) {
-                    let envXSq = (pt.x * pt.x) / (2 * 130 * 130);
-                    let envYSq = (pt.y * pt.y) / (2 * 50 * 50);
+                    let envXSq = (pt.x * pt.x) / (2 * 100 * 100);
+                    let envYSq = (pt.y * pt.y) / (2 * 45 * 45);
                     let env = exp(-envXSq - envYSq);
 
-                    // Shifted by PI to interlace exactly between the blue fringes
-                    let wave = 0.5 + 0.5 * cos(pt.y * k + Math.PI + timePhase);
+                    // Interlace phase shift by PI
+                    let wave = 0.5 + 0.5 * cos(pt.x * k + Math.PI + timePhase);
 
-                    let dynamicThresh = pt.prob + noise(pt.x * 0.1, pt.y * 0.1, frameCount * 0.1 + 100) * 0.2 - 0.1;
-                    let prob = env * wave * fringeDensity * 1.8;
+                    let dynamicThresh = pt.prob + noise(pt.x * 0.1, pt.y * 0.1, frameCount * 0.1 + 100) * 0.1 - 0.05;
+                    let prob = env * wave * splitAmt * 1.8;
 
                     if (prob > dynamicThresh) {
                         circle(pt.x, pt.y, pt.size);
@@ -215,18 +226,12 @@
             }
 
             // --- Draw the Quantum State Lobes (Cat Legs) ---
-            // We draw the blob points. When split is 0, they are heavily squeezed.
-            // We only need to draw two blobs when split > 0, but to transition smoothly:
-            // We map opacity density.
-
-            let baseAlpha = color(red(risoBlue), green(risoBlue), blue(risoBlue), 220); // Higher alpha for dense ink
+            let baseAlpha = color(red(risoBlue), green(risoBlue), blue(risoBlue), 220);
 
             if (offset < 0.5) {
-                // Draw single blob with high density
                 drawRisoBlob(0, 0, scaleX, scaleY, 1.3, baseAlpha);
             } else {
-                // Split up and down!
-                // The split moves along the Imaginary (Y) axis
+                // Split Top and Bottom! (Vertical split 90 degrees rotated from image 3)
                 drawRisoBlob(0, -offset, scaleX, scaleY, 1.1, baseAlpha);
                 drawRisoBlob(0, offset, scaleX, scaleY, 1.1, baseAlpha);
             }
